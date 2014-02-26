@@ -1,0 +1,792 @@
+/* 
+ * Исходный текст поста
+ * http://habrahabr.ru/post/167227/
+ *
+ */
+
+----------------------------------------
+- Подробно о задачах Gradle
+----------------------------------------
+
+<img src="http://habrastorage.org/getpro/habr/post_images/28a/ee2/2e3/28aee22e3febf03bdc9a5309ffb33c09.png"/>
+
+Перевод второй главы книги <a href="http://shop.oreilly.com/product/0636920019909.do">Building and Testing with Gradle</a>
+
+Основным компонентом процесса сборки в билд-файле Gradle является таск. Таски представляют собой именованные наборы инструкций билда, которые Gradle запускает выполняя сборку приложения. Таски могут показаться знакомой абстракцией при сравнении с другими билд-системами, однако Gradle предоставляет более богатую модель в отличие от той, которая вам возможно уже знакома. По сравнению с традиционными объявлениями операций билда, связанных зависимостями, таски Gradle являются полнофункциональными объектами, которыми вы при желании можете управлять программно.
+
+Рассмотрим какими способами можно определить таск. Два ключевых подхода к определеню тасков и программный интерфейс тасков, который мы можем использовать для гибкой настройки.<habracut />
+
+<h5>Объявление Таска</h5>
+Существует простой способ создания таска. Всё что нужно - указать имя таска:
+
+<h6>Пример 1. Объявление таска по одному только имени</h6>
+<source lang="bash">
+task hello
+</source>
+Выполнив команду <code>gradle hello</code> вы получите результат:
+
+<h6>Пример 2. Отчёт Gradle о новом таске</h6>
+<source lang="python">
+------------------------------------------------------------
+All tasks runnable from root project
+------------------------------------------------------------
+
+Build Setup tasks
+-----------------
+init - Initializes a new Gradle build. [incubating]
+wrapper - Generates Gradle wrapper files. [incubating]
+
+Help tasks
+----------
+dependencies - Displays all dependencies declared in root project '__project'.
+dependencyInsight - Displays the insight into a specific dependency in root project '__project'.
+help - Displays a help message
+projects - Displays the sub-projects of root project '__project'.
+properties - Displays the properties of root project '__project'.
+tasks - Displays the tasks runnable from root project '__project'.
+
+Other tasks
+-----------
+hello
+</source>
+
+<h5>Операции таска (Task Action)</h5>
+Выполнение нашего таска по команде <code>gradle hello</code> всё же не произведёт никакого результата, поскольку мы не присвоили ему ни одной операции. Операцию можно присвоить используя оператор "сдвиг влево":
+
+<h6>Пример 3. Назначение таску простейшей операции</h6>
+<source lang="python">
+task hello << {
+    println 'hello, world'
+}
+</source>
+<i>Операторы, такие как << ("сдвиг влево" из Java), могут быть перегружены в Groovy для изменения поведения в зависимости от объектов с которыми они работают. В данном случае << перегружен в Gradle для добавления блока кода в список операций, которые выполняет таск. Сдвиг влево является эквивалентом метода <code>doLast()</code>, который мы рассмотрим далее. </i>
+
+Теперь у нас есть гибкая возможность добавления кода операций накопительным способом, ссылаясь на объект таска, который мы создали:
+
+<h6>Пример 4. Последовательное добавление операций таска по одной</h6>
+<source lang="python">
+task hello
+
+hello << {
+    print 'hello, '
+}
+
+hello << {
+    println 'world'
+}
+</source>
+Теперь мы получили обратно знакомый нам текст результат выполнения билда:
+
+<h6>Пример 5. Результат выполнения билда с операциями добавленными по одной</h6>
+<source lang="bash">
+d:\project>gradle hello
+:hello
+hello, world
+
+BUILD SUCCESSFUL
+
+Total time: 1.916 secs
+</source>
+Данное поведение тривиально, однако оно раскрывает мощный принцип: таски не являются одноразовыми объявлениями операций билда. Они являются полнофункциональными объектами программной среды Gradle. И если у нас есть возможность добавлять в них операции билда накопительным способом в произвольных местах билд-файла, скорее всего у нас есть ещё и другие возможности. Посмотрим какие.
+
+<h4>Конфигурация таска</h4>
+Новые пользователи Gradle обычно путаются в синтаксисе конфигурации когда пытаются определить операции тасков. Продолжая предыдущий пример, мы можем расширить его добавив блок конфигурации:
+
+<h6>Пример 6. Комбинирование конфигурации и операции таска</h6>
+<source lang="python">
+task initializeDatabase
+
+initializeDatabase << {
+    println 'connect to database'
+}
+
+initializeDatabase << {
+    println 'update database schema'
+}
+
+initializeDatabase {
+    println 'configuring database connection'
+}
+</source>
+Запустив данный билд-файл, мы получим результат, который покажется нам нелогичным:
+
+<h6>Пример 7. Результат выполнения билд-файла созданного выше</h6>
+<source lang="bash">
+d:\project>gradle initializeDatabase
+configuring database connection
+:initializeDatabase
+connect to database
+update database schema
+
+BUILD SUCCESSFUL
+
+Total time: 3.088 secs
+</source>
+<i>Для обозначения блока кода между парой фигурных скобок, в Groovy используется термин "замкнутое выражение" или "замыкание" (closure). Функции-замыкания подобны объектам, которые можно передавать методу как параметр или присваивать переменной, с возможностью последующего выполнения. Они будут повсеместно встречаться вам в Gradle, поскольку идеально подходят в роли блоков где можно определить конфигурационный код и операции билда.</i>
+
+Последнее замкнутое выражение выглядит как очередной фрагмент операции билда, и мы ожидаем что вывод его сообщения будет последним, но не первым. Оказывается замыкание добавленное к имени таска <i>без</i> оператора сдвиг влево вообще не добавляет оператор. Вместо этого добавился блок <i>конфигурации</i>. Конфигурационный блок таска выполняется во время <i>конфигурационной</i> фазы жизненного цикла Gradle, которая предшествует фазе <i>выполнения</i> во время которой выполняются операции таска.
+
+<i>Каждый раз когда Gradle запускает билд, процесс проходит через три фазы жизненного цикла: инициализация, конфигурация и выполнение. Выполнение - фаза во время которой таски билда выполняются в порядке, указанном в настройках их зависимостей. Конфигурация это фаза в которой объекты таска собираются во внутреннюю объектную модель, обычно называемую <u>направленным ациклическим графом</u>. Инициализация - фаза в которой Gradle решает какие объекты будут принимать участие в билде. Последняя фаза важна в многопроектных билдах.</i>
+
+Конфигурационные замыкания аддитивны точно так же как и замыкания операций. Потому, мы можем написать билд-файл для предыдущего примера указанным ниже способом, при этом результат выполнения будет тот же, что и раньше:
+
+<h6>Пример 8. Добавление конфигурационных блоков</h6>
+<source lang="python">
+task initializeDatabase
+
+initializeDatabase << {
+    println 'connect to database'
+}
+
+initializeDatabase << {
+    println 'update database schema'
+}
+
+initializeDatabase {
+    print 'configuring '
+}
+
+initializeDatabase {
+    println 'database connection'
+}
+</source>
+
+Конфигурационный блок - подходящее место для установки значений переменных и структур данных, которые будут нужны операции таска когда (и если) она потом запустится в билде. Структура конфигурации даёт вам возможность превратить таски вашего билда в богатую объектную модель, заполненную информацией о билде. В этом отличие от простого набора операций билда, которые выполняются в определённой последовательности. Без этого отличия между конфигурацией и операцией, пришлось бы усложнять настройки зависимостей, что привело бы к потере надёжности и к снижению выразительности средств для связывания основных структур данных билда.
+
+<i>При запуске Gradle-файла конфигурационный код билда выполняется выполняется полностью, независимо от того, будет ли какой-либо из тасков запускаться в фазе выполнения.</i>
+
+<anchor>TasksAreObjects</anchor><h4>Таски являются объектами</h4>
+К этому времени у вас могла возникнуть догадка о том, что Gradle создаёт внутреннюю объектную модель вашего билда перед тем как выполнить его. Именно так всё и происходит. Каждый таск который вы объявляете на самом деле становится объектом-таском в пределах всего билд-проекта. У объекта-таска, как и у любого другого объекта, есть свойства и методы. И ещё мы можем управлять типом каждого объекта-таска обращаясь к функциональности определённой в нём. Несколько примеров помогут нам разобраться.
+
+По умолчанию каждому новому таску присваивается тип <code>DefaultTask</code>. Наподобие <code>java.lang.Object</code> в Java, в Gradle каждый таск наследуется от этого типа - даже те таски, которые расширяют возможности <code>DefaultTask</code> путём создания своего типа. На самом деле <code>DefaultTask</code>-таски не делают ничего умного вроде компиляции кода или копирования файлов. Однако они содержат функционал, который требуется для взаимодействия с моделью проекта Gradle. Рассмотрим методы и свойства, которые есть у каждого таска в Gradle.
+
+<h5>Методы DefaultTask</h5>
+
+<h5>dependsOn(task)</h5>
+
+Добавляет таск-зависимость для вызывающего таска. Таск-зависимость всегда запускается перед таском который зависит от него. Метод можно вызывать несколькими способами. Пример кода ниже показывает как мы можем определить зависимость таска <code>loadTestData </code> от <code>createSchema</code>:
+
+<h6>Пример 9. Различные способы вызова метода <code>dependsOn</code></h6>
+<source lang="python">
+task createSchema
+
+// Объявляем зависимость 'loadTestData' от 'createSchema'
+// Остальные зависимости, определённые ранее, остаются неизменными
+task loadTestData {
+    dependsOn createSchema
+}
+
+// Альтернативный способ указания той же зависимости
+task loadTestData {
+    dependsOn << createSchema
+}
+
+// Делаем то же самое, используя одиночные кавычки (которые обычно не нужны)
+task loadTestData {
+    dependsOn 'createSchema'
+}
+
+// Явный вызов метода объекта-таска
+task loadTestData
+loadTestData.dependsOn createSchema
+
+// Краткая нотация для определения зависимостей
+task loadTestData(dependsOn: createSchema)
+</source>
+
+Таск может зависеть от нескольких тасков. Если таск <code>loadTestData</code> зависит от тасков <code>createSchema</code> и <code>compileTestClasses</code>, мы пишем код следующим образом:
+
+<h6>Пример 10. Различные способы вызова метода dependsOn для множественных зависимостей</h6>
+<source lang="python">
+task compileTestClasses
+task createSchema
+
+// Объявление зависимостей по одной
+task loadTestData {
+    dependsOn << compileTestClasses
+    dependsOn << createSchema
+}
+
+// Передаём зависимости как список переменной длины
+task loadTestData {
+    dependsOn compileTestClasses, createSchema
+}
+
+// Явно вызываем метод объекта-таска
+task loadTestData
+loadTestData.dependsOn compileTestClasses, createSchema
+
+// Краткая нотация для определения зависимостей
+// Обратите внимание на синтаксис списков Groovy
+task loadTestData(dependsOn: [ compileTestClasses, createSchema ])
+</source>
+
+<h5>doFirst(closure)</h5>
+Добавляет блок исполнимого кода в начало операции таска. Во время фазы выполнения запускается блок операции каждого участвующего в билде таска. Метод <code>doFirst</code> позволяет вам добавлять часть логики в начало существующей операции, даже если эта операция определена в билд-файле или плагине, к которому у вас нет доступа. Вызов <code>doFirst</code> несколько раз добавляет новые блоки в код операции в начало последовательности выполнения таска.
+
+Метод <code>doFirst</code> можно вызывать напрямую для объекта-таска, передавая ему замкнутое выражение. Замкнутое выражение содержит код, который выполнится перед текущей операцией таска.
+
+<i>Как мы уже говорили, замыкание это блок Groovy кода, заключённый между парой фигурных скобок. Замыкание можно передавать методу как любой другой объект. Возможность пердавать методам замкнутые выражения является стилевой особенностью Groovy.</i>
+
+<h6>Пример 11. Вызов метода doFirst объекта-таска</h6>
+<source lang="python">
+task setupDatabaseTests << {
+    // Здесь определена текущая операция таска
+    println 'load test data'
+}
+
+setupDatabaseTests.doFirst {
+    println 'create schema'
+}
+</source>
+<code>doFirst</code> можно также вызывать в конфигурационном блоке таска. Как мы уже говорили, конфигурационный блок это часть исполняемого кода, которая запускается перед тем как выполняются операции таска, во время конфигурационной фазы билда. Когда мы рассматривали выше конфигурацию тасков, у вас мог возникнуть вопрос, где можно приенить конфигурационный блок. Следующий пример покзывает вам, как можно вызывать методы таска внутри конфигурационного блока, что в перспективе делает очень выразительным формат изменения поведения таска:
+
+<h6>Пример 13. Вызов метода doFirst внутри конфигурационного блока таска</h6>
+<source lang="python">
+task setupDatabaseTests << {
+    println 'load test data'
+}
+
+setupDatabaseTests {
+    doFirst {
+        println 'create schema'
+    }
+}
+</source>
+Повторные вызовы <code>doFirst</code> аддитивны. Код операции каждого предыдущего вызова сохраняется и новое замыкание добавляется в начало списка, готовое выполниться в соответствующем порядке. Если нам нужно настроить базу данных для интеграционного тестирования (и сделать это по частям), можно использовать следующий код:
+
+<h6>Пример 14. Повторные вызовы doFirst обладают свойством кумулятивности</h6>
+<source lang="python">
+task setupDatabaseTests << {
+    println 'load test data'
+}
+
+setupDatabaseTests.doFirst {
+    println 'create database schema'
+}
+
+setupDatabaseTests.doFirst {
+    println 'drop database schema'
+}
+</source>
+
+<h6>Пример 15. Результат выполнения предыдущего примера</h6>
+<source lang="bash">
+d:\project>gradle setupDatabaseTests
+:setupDatabaseTests
+drop database schema
+create database schema
+load test data
+
+BUILD SUCCESSFUL
+
+Total time: 3.126 secs
+</source>
+
+В предыдущем примере разделение инициализации на три отдельных замыкания с вызовом <code>doFirst()</code>, было, конечно же, несколько искуственным шагом. Однако, бывают случаи когда исходный код таска недоступен. Например, таск определён в другом билд-файле, модифицировать который невозможно или непрактично. Рассматриваемый способ программной модификации недоступной логики открывает большие возможности.
+
+До сих пор в наших примерах использоватлся очень простой синтаксис, который раскрывает принципы работы Gradle за счёт многократных повторений. Вероятнее всего, в настоящем билде мы организуем таск следующим образом (всё так же, вместо настоящих тестовых операций мы используем операторы <code>println</code>):
+
+<h6>Пример 16. Повторные вызовы doFirst после рефакторинга</h6>
+<source lang="python">
+// Исходное определение таска (может быть недоступно для редактирования)
+task setupDatabaseTests << {
+    println 'load test data'
+}
+
+// Наши изменени таска (в файле, где мы можем вносить изменения)
+setupDatabaseTests {
+    doFirst {
+        println 'create database schema'
+    }
+    doFirst {
+        println 'drop database schema'
+    }
+}
+</source>
+Обратите внимание на то что мы собрали вместе несколько вызовов <code>doFirst</code> внутри одного конфигурационного блока после того как начальная операция уже была добавлена в таск <code>setupDatabaseTests</code>.
+
+<h5>doLast(closure)</h5>
+Метод <code>doLast</code> очень похож на метод <code>doFirst</code> с той разницей что он добавляет поведение в конец операции, а не в начало. Если вам нужно запустить блок кода после того как существующий таск закончит выполнение, вы можете поступить следующим образом:
+
+<h6>Пример 17. Использование метода doLast</h6>
+<source lang="python">
+task setupDatabaseTests << {
+    println 'create database schema'
+}
+
+setupDatabaseTests.doLast {
+    println 'load test data'
+}
+</source>
+<h6>Пример 18. Повторные вызовы doLast аддитивны</h6>
+<source lang="python">
+task setupDatabaseTests << {
+    println 'create database schema'
+}
+
+setupDatabaseTests.doLast {
+    println 'load test data'
+}
+
+setupDatabaseTests.doLast {
+    println 'update version table'
+}
+</source>
+
+<i>Как уже говорилось ранее в параграфе "Операции таска", оператор << является ещё одним способом вызова метода <code>doLast()</code>.</i>
+
+<h5>onlyIf(closure)</h5>
+Метод <code>onlyIf</code> позволяет вам использовать предикат, который определяет, будет ли таск выполняться. Значением предиката считается значение возвращаемое замыканием. При помощи данного метода вы можете деактивировать выполнение таска, который иначе запустится как обычный элемент последовательности зависимостей билда.
+
+<i>В Groovy последнее выражение замкнутого выражения считается его возвращаемым значением, даже если нет оператора <code>return</code>. Метод Groovy в котором определено только одно выражение является функцией, возвращающей значение этого выражения.</i>
+
+<h6>Пример 19. Билд файл в котором используется метод onlyIf</h6>
+<source lang="python">
+task createSchema << {
+    println 'create database schema'
+}
+
+task loadTestData(dependsOn: createSchema) << {
+    println 'load test data'
+}
+
+loadTestData.onlyIf {
+    System.properties['load.data'] == 'true'
+}
+</source>
+<h6>Пример 20. Два запуска прошлого билд-файла. Обратите внимание на разницу в результатах</h6>
+<source lang="bash">
+d:\project>gradle loadTestData
+:createSchema
+create database schema
+:loadTestData SKIPPED
+
+BUILD SUCCESSFUL
+
+Total time: 4.361 secs
+d:\project>gradle -Dload.data=true loadTestData
+:createSchema
+create database schema
+:loadTestData
+load test data
+
+BUILD SUCCESSFUL
+
+Total time: 2.005 secs
+</source>
+При помощи метода <code>onlyIf</code> вы можете включать и выключать отдельные таски при помощи логики, выражаемой Groovy-кодом, что не ограничивается одной лишь проверкой простого свойства <code>System</code>, которое мы использовали в примере. Вы можете читать файлы, вызывать Веб-сервисы, проверять логины-пароли и делать практически всё остальное.
+
+<h5>Свойства DefaultTask</h5>
+
+<h5>didWork</h5>
+Свойство типа <code>boolean</code>, указывающее завершился ли успешно таск. Не все таски к моменту завершения устанавливают значение <code>didWork</code>. Однако некоторые таски, такие как <code>Compile</code>, <code>Copy</code> и <code>Delete</code>, устанавливают значение данного свойства для передачи информации о том что их операции выполнены успешно или с ошибками. Вычисление значения, указывающего на то что таск уже выполнился специфично для разных тасков. Вы можете установить значение <code>didWork</code> в вашем таске для отражения результатов выполнения созданного вами билд-кода:
+
+<h6>Пример 21. Отправка электронного письма для случая когда компиляция прошла успешно</h6>
+<source lang="python">
+apply plugin: 'java'
+
+task emailMe(dependsOn: compileJava) << {
+    if (tasks.compileJava.didWork) {
+        println 'SEND E-MAIL ANNOUNCING SUCCESS'
+    }
+}
+</source>
+<h6>Пример 22. Результаты выполнения билда с испльзованием didWork</h6>
+<source lang="bash">
+d:\project>gradle emailMe
+:compileJava UP-TO-DATE
+:emailMe
+
+BUILD SUCCESSFUL
+
+Total time: 3.753 secs
+</source>
+<h5>enabled</h5>
+Свойство типа <code>boolean<code>, указывающее на то, будет ли выполняться таск. Вы можете отключить выполнение таска, установив свойству <code>enabled</code> значение <code>false</code>. Зависимости таска выполнятся в том же порядке, как если бы таск не был отключен.
+<h6>Пример 23. Отключение таска</h6>
+<source lang="python">
+task templates << {
+    println 'process email templates'
+}
+
+task sendEmails(dependsOn: templates) << {
+    println 'send emails'
+}
+
+sendEmails.enabled = false
+</source>
+<h6>Пример 24. Билд с отключенным таском. Заметим, что зависимость по-прежнему запускается</h6>
+<source lang="bash">
+d:\project>gradle -b enabled.gradle sendEmails
+:templates
+process email templates
+:sendEmails SKIPPED
+
+BUILD SUCCESSFUL
+
+Total time: 3.271 secs
+</source>
+<i>Параметр командной строки -b указывает Gradle на отличный от файла по-умолчанию билд-файл. По-умолчанию Gradle ищет файл с называнием <code>build.gradle</code>, но данный параметр позволяет нам указать другой файл.</i>
+
+<h5>path</h5>
+Свойство строчного типа, содержащее полный путь таска. По-умолчанию путём таска является имя таска с символом двоеточие впереди.
+
+<h6>Пример 25. Одноуровневый билд-файл, который отображает путь единственного таска, определённого в нём</h6>
+<source lang="python">
+task echoMyPath << {
+    println "THIS TASK'S PATH IS ${path}"
+}
+</source>
+<h6>Пример 26. Результаты выполнения предыдущего билд-файла</h6>
+<source lang="dos">
+d:\project>gradle echoMyPath
+:echoMyPath
+THIS TASK'S PATH IS :echoMyPath
+
+BUILD SUCCESSFUL
+
+Total time: 3.135 secs
+</source>
+Двоеточие впереди указывает на то что таск расположен на верхнем уровне билд-файла. Расположение тасков на верхнем уровне, однако, не является обязательным. Gradle поддерживает зависимые подпроекты или вложенные билды. Если таск определён во вложенном билде с названием <code>subProject</code>, его путь будет <code>:subProject:echoMyPath</code>.
+
+<h5>logger</h5>
+Ссылка на внутренний объект Gradle <code>logger</code>. В Gradle <code>logger</code> реализует интерфейс <code>org.slf4j.Logger</code> с несколькими дополнительными уровнями логирования. Ниже описаны уровни логирования, поддерживаемые объектом <code>logger</code>. Установка уровня логирования в одно из значений ниже включает логирование на всех последующих уровнях кроме <code>WARN</code> и <code>QUIET</code>:
+
+<ul>
+	<li><code>DEBUG</code>. Для подробных сообщений логирования, которые нужны разработчику билда, однако не должны выводиться в момент выполнения билда в нормальном режиме. Если выбран данный уровень, Gradle автоматически использует расширенный формат логирования, который в каждом сообщении вставляет метку времени, уровень логирования, и имя таска, который производит логирование. Остальные уровни формируют более краткую форму сообщения.</li>
+	<li><code>INFO</code>. Нужен для менее информативных сообщений билда, играющих второстепенную роль во время выполнения билда.</li>
+	<li><code>LIFECYCLE</code>. Малоинформативные сообщения об изменениях в жизенном цикле билда и процессе выполнениия инструмента сборки. Обычно генерируются самим Gradle. Данный уровень используется по умолчанию когда Gradle запускается без опции командной строки -q. Сообщения которые выводит <code>println</code> имеют данный уровень логирования.</li>
+	<li><code>WARN</code>. Малоинформативные, но важные сообщения, сообщающие о потенциальных проблемах билда. Когда уровень логирования установлен в <code>WARN</code>, сообщения уровня <code>QUIET</code> не выводятся.</li>
+	<li><code>QUIET</code>. Сообщения, которые выводятся даже если вывод сообщений был отключен параметром командной строки -q. (Выполнение билда с параметром -q делает <code>QUIET</code> уровнем логирования по умолчанию). Сообщения выводимые оператором <code>System.out.println</code> имеют данный уровень логирования. Когда уровень логирования установлен в <code>QUIET</code>, сообщения уровня <code>WARN</code> не выводятся.</li>
+	<li><code>ERROR</code>. Важные сообщения критической важности, кототые выводятся редко на всех уровнях логирования. Сообщения информируют о завершении билда с ошибками. Если <code>ERROR</code> - текущий уровень логирования, вызовы <code>System.out.println</code> не будут выводиться в консольном окне.</li>
+</ul>
+<h6>Пример 27. Таск демонстрирует эфект применения всех уровней логирования. Несколько более продвинутый код Groovy устанавливает уровень логирования для каждой из возможных опций, определённых в списке. Таким образом, каждый раз осуществляется вывод сообщений на каждом из уровней логирования.</h6>
+<source lang="ruby">
+task logLevel << {
+
+    def levels = ['DEBUG', 'INFO', 'LIFECYCLE', 'QUIET', 'WARN', 'ERROR']
+
+    levels.each { level ->
+        logging.level = level
+        def logMessage = "SETTING LogLevel=${level}"
+
+        logger.error logMessage
+        logger.error '-' * logMessage.size()
+        logger.debug 'DEBUG ENABLED'
+        logger.info  'INFO ENABLED'
+        logger.lifecycle 'LIFECYCLE ENABLED'
+        logger.warn  'WARN ENABLED'
+        logger.quiet 'QUIET ENABLED'
+        logger.error 'ERROR ENABLED'
+        println 'THIS IS println OUTPUT'
+        logger.error ' '
+    }
+}
+</source>
+<h6>Пример 28. Результат выполнения прошлого билд-файла</h6>
+<source lang="bash">
+d:\project>gradle logLevel
+19:35:44.677 [LIFECYCLE] [class org.gradle.TaskExecutionLogger]
+19:35:44.699 [ERROR] [org.gradle.api.Task] SETTING LogLevel=DEBU
+19:35:44.732 [ERROR] [org.gradle.api.Task] ---------------------
+19:35:44.747 [DEBUG] [org.gradle.api.Task] DEBUG ENABLED
+19:35:44.760 [INFO] [org.gradle.api.Task] INFO ENABLED
+19:35:44.775 [LIFECYCLE] [org.gradle.api.Task] LIFECYCLE ENABLED
+19:35:44.788 [WARN] [org.gradle.api.Task] WARN ENABLED
+19:35:44.801 [QUIET] [org.gradle.api.Task] QUIET ENABLED
+19:35:44.812 [ERROR] [org.gradle.api.Task] ERROR ENABLED
+19:35:44.857 [QUIET] [system.out] THIS IS println OUTPUT
+19:35:44.868 [ERROR] [org.gradle.api.Task]
+SETTING LogLevel=INFO
+---------------------
+INFO ENABLED
+LIFECYCLE ENABLED
+WARN ENABLED
+QUIET ENABLED
+ERROR ENABLED
+THIS IS println OUTPUT
+
+SETTING LogLevel=LIFECYCLE
+--------------------------
+LIFECYCLE ENABLED
+WARN ENABLED
+QUIET ENABLED
+ERROR ENABLED
+THIS IS println OUTPUT
+
+SETTING LogLevel=QUIET
+----------------------
+QUIET ENABLED
+ERROR ENABLED
+THIS IS println OUTPUT
+
+SETTING LogLevel=WARN
+---------------------
+WARN ENABLED
+QUIET ENABLED
+ERROR ENABLED
+THIS IS println OUTPUT
+
+SETTING LogLevel=ERROR
+----------------------
+ERROR ENABLED
+
+
+BUILD SUCCESSFUL
+
+Total time: 2.184 secs
+</source>
+
+<h5>logging</h5>
+Свойство <code>logging</code> предоставляет нам управлять уровнем логирования. Как уже было показано выше, в примере для <code>logger</code>, через свойство <code>logging.level</code>, можно получать и изменять уровень логирования билда.
+
+<h5>description</h5>
+Свойство <code>description</code>, как видно из названия, описывает назначение таска небольшим количеством метаданных, доступных для понимания человека. Значение <code>description</code> можно установить несколькими способами:
+
+<h6>Пример 29. Одновременно задаём описание таска и поведение</h6>
+<source lang="python">
+task helloWorld(description: 'Says hello to the world') << {
+    println 'hello, world'
+}
+</source>
+<h6>Пример 30. Два способа объявления поведения таска и задания описания</h6>
+<source lang="python">
+task helloWorld << {
+    println 'hello, world'
+}
+
+helloWorld {
+    description 'Says hello to the world'
+}
+
+// Ещё один способ
+helloWorld.description 'Says hello to the world'
+</source>
+
+<h5>temporaryDir</h5>
+Свойство <code>temporaryDir</code> возвращает объект <code>File</code>, который ссылается на временную директорию текущего билд-файла. Такая директория создаётся для временного хранения промежуточных результатов работы таска или для организации файлов, которые таск будет обрабатывать.
+
+<h5>Динамические свойства</h5>
+Как мы уже видели, таски содержат набор внутренних свойств, играющих большую роль для пользователя Gradle. В добавок к этому, мы можем также присваивать таску свойства. Объект-таск работает как хеш-таблица, которая может хранить любые имена свойств и значения, которые мы им присваиваем (если только наши имена свойств не конфликтуют с именами встроенных свойств).
+
+Рассмотрим пример: таск <code>createArtifact</code> зависит от таска <code>copyFiles</code>. Задача <code>copyFiles</code> - собирать файлы из нескольких источников и копировать их во временную директорию, которую <code>createArtifact</code> в дальнейшем преобразует в артифакт развёртывания. Список файлов звисит от параметров билда, но для соответствия специфическим требованиям развёрнутого приложения, в артифакте должен храниться манифест, перечисляющий файлы. Здесь очень удобно использовать динамическое свойство:
+
+<h6>Пример 31. Билд-файл, в котором показан пример динамического свойства</h6>
+<source lang="python">
+task copyFiles {
+    // Где угодно находим файлы, копируем их
+    // (здесь для наглядности используем фиксированный список)
+    fileManifest = [ 'data.csv', 'config.json' ]
+}
+
+task createArtifact(dependsOn: copyFiles) << {
+    println "FILES IN MANIFEST: ${copyFiles.fileManifest}"
+}
+</source>
+<h6>Пример 32. Результат выполнения билд-файла из примера выше</h6>
+<source lang="bash">
+d:\project>gradle -q createArtifact
+FILES IN MANIFEST: [data.csv, config.json]
+</source>
+
+<anchor>TaskTypes</anchor><h5>Типы тасков</h5>
+Как мы уже говорили выше, в параграфе <a href="#TasksAreObjects">Таски являются объектами</a>, у каждого таска есть тип. Кроме типа <code>DefaultTask</code>, есть ещё другие типы тасков для копирования, архивирования, запуска программ и другие. Объявление типа таска во многом похоже на наследование от базового класса в объектно-ориентированном языке. Таким образом, выполнив наследование, вы тут же получаете в вашем таске определённые свойства и методы. Подобный синтаксис значительно укорачивает определение тасков при том что возможности остаются большими.
+
+Рассмотрение полной документации по таскам находится за рамками данного издания, но всё же мы рассмотрим несколько важных типов с примерами использования.
+
+<h5>Copy</h5>
+Таск <code>Copy</code> копирует файлы из одного места в другое. В простейшем случае - копирует файлы из одной директории в другую, с некоторыми дополнительными ограничениями по включению или исключению файлов, используя маски имён файлов:
+<h6>Пример 33. Простейший пример таска <code>Copy</code></h6>
+<source lang="python">
+task copyFiles(type: Copy) {
+    from 'resources'
+    into 'target'
+    include '**/*.xml', '**/*.txt', '**/*.properties'
+}
+</source>
+
+<h5>Jar</h5>
+Таск <code>Jar</code> создаёт Jar-файл из файлов ресурсов. Таск данного типа c ожидаемым названием <code>Jar</code> создаёт плагин Java. Таск упаковывает в Jar-файл с названием проекта *.class-файлы и ресурсы, при этом использует обычный манифест. Результат кладётся в директорию <code>build/libs</code>. Данный таск в высшей степени гибок.
+<h6>Пример 34. Простейший пример таска <code>Jar</code></h6>
+<source lang="python">
+apply plugin: 'java'
+
+task customJar(type: Jar) {
+    manifest {
+        attributes firstKey: 'firstValue', secondKey: 'secondValue'
+    }
+    archiveName = 'hello.jar'
+    destinationDir = file("${buildDir}/jars")
+    from sourceSets.main.output
+}
+</source>
+Обратите внимание - имя архива и целевая папка легко конфигурируются. Таким же образом можно менять значения файла манифеста используя понятный синтаксис словарей Groovy. Содержимое JAR-файла определяется строкой <code>from sourceSets.main.output</code>, которая включает .class-файлы. Метод <code>from</code> идентичен тому, который используется в примере <code>CopyTask</code>, что показывает одну интересную деталь: таск <code>Jar</code> наследуется от таска <code>Copy</code>. Зная эту особенность, можно сделать некоторые выводы об устройстве лежащей в основе структуры классов, ещё до того как мы заглянем в документацию.
+
+Выражение, которое присваивается <code>destinationDir</code> очень простое. Было бы естественнее, если бы свойству <code>destinationDir</code> присваивалась строка. Но свойство работает с объектами <code>java.io.File</code>. Метод <code>file()</code>, который всегда доступен внутри билд файла Gradle, конвертирует строку в объект <code>File</code>.
+
+<i>Помните, вы всегда можете найти документацию <code>docs/dsl/index.html</code>, где описываны стандартные возможности Gradle, такие как таск <code>Jar</code>. Описание всех возможностей таска <code>Jar</code> лежит за рамками нашей статьи.</i>
+
+<h5>JavaExec</h5>
+Таск <code>JavaExec</code> запускает Java-класс c методом <code>main()</code>. Запуск консольного Java-приложения может быть сопряжён с неудобставми. Однако данный таск избавляет от неудобств, интегрируя консольные Java-приложения в ваш билд:
+<h6>Пример 35. Таск Gradle запускает консольное Java-приложение (пример взят из <a href="https://github.com/gradleware/oreilly-gradle-book-examples/tree/master/tasks-javaexec-task">javaexec-task</a>)</h6>
+<source lang="python">
+apply plugin: 'java'
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    compile 'commons-codec:commons-codec:1.6'
+    runtime 'commons-codec:commons-codec:1.6'
+}
+
+task encode(type: JavaExec, dependsOn: classes) {
+    main = 'org.gradle.example.commandline.MetaphoneEncoder'
+    args = "The rain in Spain falls mainly in the plain".split().toList()
+    classpath sourceSets.main.output.classesDir
+    classpath configurations.runtime
+}
+</source>
+<source lang="java">
+package org.gradle.example.commandline;
+
+import org.apache.commons.codec.language.Metaphone;
+
+public class MetaphoneEncoder {
+    public static void main(String args[]) {
+        Metaphone codec = new Metaphone();
+        String phrase = "";
+        String encoded = "";
+        for (String s : args) {
+            phrase += s.toUpperCase() + " ";
+            encoded += codec.encode(s) + " ";
+        }
+
+        System.out.println("PHRASE =" + phrase);
+        System.out.println("ENCODED=" + encoded);
+    }
+}
+</source>
+<i>В таске <code>encode</code> свойству <code>classpath</code> присваивается <code>configurations.runtime</code>. <code>configurations</code> это коллекция зависимостей имеющих нечто общее. В нашем случае <code>runtime</code> содержит те зависимости, которые должны быть доступны для приложения во время выполнения. Они совсем отличны от зависимостей, которые необходимы для компиляции (<code>compile</code>), запуска тестов или зависимостей, которые нужны для компиляции и запуска одновременно, но представлены средой выполнения, как сервер приложений. Свойство <code>configurations</code> в Gradle это коллекция всех конфигураций определённых в билде, каждая из которых в свою очередь является коллекцией реальных зависимостей.</i>
+
+В билд-файле объявлена внешняя зависимость от библиотеки Apache Commons Codec. Мы компилируем наш Java-файл, затем собираем командную строку запуска приложения используя путь скомпилированного файла .class и JAR-зависимость. В билд-файле указываем класс, в котором запустится метод <code>main()</code> (<code>org.gradle.example.commandline.MetaphoneEncoder</code>), задаём ему параметры командной строки в форме списка, и указываем необходимые элементы <code>classpath</code>. В данном случае мы можем условно сослаться на основные классы, доступные в <code>sourceSets</code>, и на все зависимости, объявленные в конфигурации <code>runtime</code>. Таск описанный в примере будет работать даже если у нас будет определено множество других зависимостей из разных репозиториев, включая даже статические зависимости в директории проекта.
+
+<h5>Пользовательские типы тасков</h5>
+Иногда возможностей встроенных тасков Gradle может быть не достаточно для решения вашей задачи. Тогда самым выразительным способом разработки вашего билда будет создание пользовательского таска. В Gradle есть несколько способов сделать это. Мы рассмотрим два наиболее распространённых.
+
+<h5>Определение пользовательского типа таска в билд-файле</h5>
+Допустим, в вашем билде нужно выполнить различные запросы в базе данных MySQL. В Gradle это можно сделать несколькими способами, но вы решили что создание пользовательского таска будет наиболее выразительным способом для такой задачи. Простейший способ создания таска - объявить его так, как показано в примере ниже:
+<anchor>CustomTaskExample</anchor><h6>Пример 36. Пользовательский таск для выполнения запросов в базе данных MySQL (из примера <a href="https://github.com/gradleware/oreilly-gradle-book-examples/blob/master/tasks-custom-task/build.gradle">custom-task</a></h6>
+<source lang="javascript">
+task createDatabase(type: MySqlTask) {
+  sql = 'CREATE DATABASE IF NOT EXISTS example'
+}
+
+task createUser(type: MySqlTask, dependsOn: createDatabase) {
+  sql = "GRANT ALL PRIVILEGES ON example.* TO exampleuser@localhost IDENTIFIED BY 'passw0rd'"
+}
+
+task createTable(type: MySqlTask, dependsOn: createUser) {
+  username = 'exampleuser'
+  password = 'passw0rd'
+  database = 'example'
+  sql = 'CREATE TABLE IF NOT EXISTS users (id BIGINT PRIMARY KEY, username VARCHAR(100))'
+}
+
+class MySqlTask extends DefaultTask {
+  def hostname = 'localhost'
+  def port = 3306
+  def sql
+  def database
+  def username = 'root'
+  def password = 'password'
+  
+  @TaskAction
+  def runQuery() {
+    def cmd
+    if(database) {
+      cmd = "mysql -u ${username} -p${password} -h ${hostname} -P ${port} ${database} -e "
+    }
+    else {
+      cmd = "mysql -u ${username} -p${password} -h ${hostname} -P ${port} -e "
+    }
+    project.exec {
+      commandLine = cmd.split().toList() + sql
+    }
+  }
+}
+</source>
+Пользовательский таск <code>MySqlTask</code> наследуется от класса <code>DefaultTask</code>. Все пользовательские таски должны наследоваться от класса <code>DefaultTask</code>, либо производного от него класса. (Пользовательский таск может наследоваться от любого другого типа таска, отличного от <code>DefaultTask</code>. См. выше параграф <a href="#TaskTypes">Типы тасков</a>, где описаны наиболее важные встроенные типы тасков.) В терминах Groovy, в таске объявлены свойства (такие как <code>hostname</code>, <code>database</code>, <code>sql</code> и т.д.). Далее объявлен метод <code>runQuery()</code>, который помечен аннотацией <code>@TaskAction</code>. <code>runQuery()</code> запустится когда таск будет выполняться.
+
+Фактические билд-таски, определённые в начале билд-файла объявлены как таски типа <code>MySqlTask</code>. Таким образом они автоматически наследуют свойства и операцию базового класса тасков. Для большинства свойств определены значения по умолчанию (однако для таких свойств как <code>username</code> и <code>password</code> значения, конечно же, специфичны для билда), потому остаётся лишь небольшая часть того, что нужно сконфигурировать прежде чем выполненить каждый из тасков. Таски <code>createDatabase</code> и <code>createUser</code> конфигурируют всего лишь один SQL-запрос и предполагают в дальнейшем использование значений по умолчанию.
+
+Таск <code>createTable</code> переопределяет свойства <code>username</code>, <code>password</code> и <code>database</code>. Таким образом зависимости таска создают новую базу данных и пользователя, отличные от административных настроек по умолчанию. В Gradle широко применяется паттерн, который при необходимости допускает переопределение конфигурации с настройками по умолчанию.
+
+<h5>Определение пользовательского типа таска в дереве исходников</h5>
+Если пользовательский таск очень велик, его логика плохо впишется в билд-файл. Как было показано в примере выше, таск может состоять из нескольких строк простого кода. Однако на определённом этапе сложный таск может развиться в свою собственную иерархию классов c зависимостями от внешнего API и необходимостью применить автоматизированное тестирование. Билд является кодом, а сложный код билда нужно рассматривать как истинного обитателя мира разработки кода. Такая задача в Gradle решается просто.
+
+Когда логика пользовательского таска перерастает разумные пределы билд-файла, мы можем её перенести в директорию <code>buildSrc</code>, которая находится в корне проекта. Директория эта автоматически компилируется и добавляется в classpath билда. Мы изменим предыдущий пример, в котором будем использовать <code>buildSrc</code>:
+<h6>Пример 37. Билд-файл использующий пользовательский таск определённый <a href="https://github.com/gradleware/oreilly-gradle-book-examples/tree/master/tasks-custom-task-buildsrc">во внешнем файле</a></h6>
+<source lang="javascript">
+task createDatabase(type: MySqlTask) {
+  sql = 'CREATE DATABASE IF NOT EXISTS example'
+}
+
+task createUser(type: MySqlTask, dependsOn: createDatabase) {
+  sql = "GRANT ALL PRIVILEGES ON example.* TO exampleuser@localhost IDENTIFIED BY 'passw0rd'"
+}
+
+task createTable(type: MySqlTask, dependsOn: createUser) {
+  username = 'exampleuser'
+  password = 'passw0rd'
+  database = 'example'
+  sql = 'CREATE TABLE IF NOT EXISTS users (id BIGINT PRIMARY KEY, username VARCHAR(100))'
+}
+</source>
+<h6>Пример 38. Определение пользовательского таска в директории <code>buildSrc</code></h6>
+<source lang="javascript">
+import org.gradle.api.DefaultTask
+import org.gradle.api.tasks.TaskAction
+
+class MySqlTask extends DefaultTask {
+  def hostname = 'localhost'
+  def port = 3306
+  def sql
+  def database
+  def username = 'root'
+  def password = 'password'
+  
+  @TaskAction
+  def runQuery() {
+    def cmd
+    if(database) {
+      cmd = "mysql -u ${username} -p${password} -h ${hostname} -P ${port} ${database} -e "
+    }
+    else {
+      cmd = "mysql -u ${username} -p${password} -h ${hostname} -P ${port} -e "
+    }
+    project.exec {
+      commandLine = cmd.split().toList() + sql
+    }
+  }
+}
+</source>
+Заметим, что определение таска в директории <code>buildSrc</code> полностью совпадает с кодом, включённым в скрипт билда в <a href="#CustomTaskExample">позапрошлом примере</a>. Тем не менее, теперь у нас появляется работоспособная платформа, пригодная для совершенствования кода простого таска, наращивания объектной модели, написания тестов и всего остального что мы обычно делаем разрабатывая код.
+
+<i>Есть четыре способа, куда вы можете поместить пользовательский билд-код Gradle. Первый - добавить код собственно, в билд-скрипт, в блок операции таска. Второй - создать внешний файл в директории <code>buildSrc</code>, как было только что сделано в последнем примере. Третий способ - импортировать внешний файл с билд-скриптом в наш основной билд-скрипт. Четвёртый - импорт специального модуля (plug-in), написанного на Java или Goovy. Создание специальных модулей в Gradle - отдельная большая тема.</i>
+<h6>Пример 39. Структура проекта Gradle, использующего пользовательский код, помещённый в директорию  <code>buildSrc</code></h6>
+<source lang="dos">
+.
+├── build.gradle
+├── buildSrc
+│   └── src
+│       └── main
+│           └── groovy
+│               └── org
+│                   └── gradle
+│                       └── example
+│                           └── task
+│                               └── MySqlTask.groovy
+</source>
